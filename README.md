@@ -2,7 +2,7 @@
 
 # 1. Token-Based Backend
 
-* **File Path:** `C:\Users\abhyu\OneDrive\Desktop\Test\Tokenbased\main.py`
+
 * **Core Technology:** This backend uses JWT magic link authentication. It does not generate a numeric OTP. Instead, it creates a signed token and sends that token inside a clickable email link.
 
 ### Main Purpose
@@ -186,7 +186,7 @@ user_email = decoded_payload["sub"]
 
 # 2. OTP-Based Backend
 
-* **File Path:** `C:\Users\abhyu\OneDrive\Desktop\Test\OTP\OTP.py`
+
 * **Core Technology:** This backend uses a classic 6-digit email OTP system.
 
 ### Main Purpose
