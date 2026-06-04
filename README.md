@@ -183,207 +183,225 @@ user_email = decoded_payload["sub"]
 
 
 
+2. OTP-Based Backend
 
-# 2. OTP-Based Backend
+Core Technology
 
+This backend uses a secure 6-digit email OTP authentication system built with FastAPI.
 
-* **Core Technology:** This backend uses a classic 6-digit email OTP system.
+Main Purpose
 
-### Main Purpose
+User enters email → backend generates secure OTP → OTP is hashed and stored → OTP is sent by email → user enters OTP → backend verifies the submitted code against the stored hash.
 
-User enters email -> backend generates 6-digit OTP -> sends OTP by email -> user enters OTP -> backend verifies it
+App Initialization & CORS Configuration
 
-### App Initialization & CORS Configuration
+The application is initialized using FastAPI.
 
-* The app is created with:
-```python
-app = FastAPI(title="Global Target SMTP Server")
+Cross-Origin Resource Sharing (CORS) is enabled to allow frontend applications to communicate with the authentication API.
 
-```
+Current Configuration
 
-
-* It also enables CORS:
-```python
 allow_origins=["*"]
 
-```
+Note:
 
+This configuration is acceptable for development and testing environments but should be restricted to trusted frontend domains in production deployments.
 
-* *Note:* Again, okay for local testing, but too open for production.
+Configuration Values
 
+The application loads the following configuration values:
 
+• SENDER_GMAIL
+• GMAIL_APP_PASSWORD
 
-### Configuration Values
+These credentials are used to authenticate with Gmail SMTP for transactional email delivery.
 
-* `SENDER_GMAIL`
-* `GMAIL_APP_PASSWORD`
-* These are used to log into Gmail SMTP and send the OTP email.
+Data Storage
 
+The backend currently stores authentication state in memory using Python dictionaries:
 
+• otp_store
+• otp_send_history
+• otp_verify_lockouts
 
-### Data Storage
+OTP records contain:
 
-* The backend stores OTPs in memory:
-```python
-otp_store = {}
+• Hashed OTP value
+• Expiration timestamp
+• Verification attempt counter
 
-```
+Example:
 
-
-* Example after generating an OTP:
-```json
 {
-    "user@example.com": "482913"
+"[user@example.com](mailto:user@example.com)": {
+"code_hash": "...",
+"expires_at": 1234567890,
+"attempts": 0
+}
 }
 
-```
+Note:
 
+The plaintext OTP is never stored after generation. Only its cryptographic hash is retained.
 
+Request and Verification Schemas
 
-### Request and Verification Schemas
+OTP Request Schema
 
-```python
 class RequestSchema(BaseModel):
-    email: EmailStr
+email: EmailStr
 
-```
+Purpose:
 
-* *Note:* This is used when requesting an OTP.
+Used when requesting a new OTP.
 
-```python
+OTP Verification Schema
+
 class VerifySchema(BaseModel):
-    email: EmailStr
-    code: str
+email: EmailStr
+code: str
 
-```
+Purpose:
 
-* *Note:* This is used when verifying the OTP.
+Used when verifying a submitted OTP.
 
-### Main Endpoints
+Main Endpoints
 
-* `POST /v1/auth/otp/request`
-* `POST /v1/auth/otp/verify`
+POST /v1/auth/otp/request
 
-### Endpoint 1: Request Processing Details
+POST /v1/auth/otp/verify
 
-```python
-@app.post("/v1/auth/otp/request")
-async def send_global_otp(payload: RequestSchema):
+Endpoint 1: OTP Request Processing
 
-```
+The endpoint receives a valid email address.
 
-* It takes the submitted email:
-```python
-target_destination = payload.email.lower()
+The submitted email is normalized to lowercase to ensure consistency.
 
-```
+Before generating an OTP, the system performs several security checks:
 
+• Verification lockout status
+• OTP resend cooldown period
+• Email-based rate limiting
 
-* Then generates the OTP:
-```python
-generated_otp = f"{random.randint(100000, 999999)}"
+Current Controls
 
-```
+• Maximum 3 OTP requests per hour per email address
+• 30-second cooldown between OTP requests
+• Temporary lockout enforcement
 
+OTP Generation
 
-* *Note:* This creates a random 6-digit number from 100000 to 999999. Examples: 193847, 650291, 904422.
+The system generates a cryptographically secure 6-digit OTP using a secure random source.
 
+Examples:
 
-* Then it stores the OTP:
-```python
-otp_store[target_destination] = generated_otp
+193847
+650291
+904422
 
-```
+OTP Protection
 
+Immediately after generation, the OTP is hashed using SHA-256.
 
-* *Note:* So each email has its own OTP.
+Only the hash is stored in memory.
 
+The plaintext OTP is sent to the user via email and is not retained for verification purposes.
 
-* Then it builds an HTML email and inserts the OTP into the email body: `{generated_otp}`
-* It also puts the OTP in the email subject:
-```python
-container_envelope['Subject'] = f"[ALRT-{generated_otp}] ..."
+OTP Expiration
 
-```
+Each OTP is assigned a five-minute validity period.
 
+Expired OTPs are automatically rejected during verification.
 
-* *Note:* That works, but it is not ideal for privacy because email subjects are often more visible.
+Email Delivery
 
+The OTP is inserted into the HTML email body and delivered through Gmail SMTP.
 
-* Then it sends the email using Gmail SMTP:
-```python
-smtp_connector = smtplib.SMTP("smtp.gmail.com", 587)
-smtp_connector.starttls()
-smtp_connector.login(SENDER_GMAIL, GMAIL_APP_PASSWORD)
-smtp_connector.sendmail(...)
-smtp_connector.quit()
+Transport Security
 
-```
+SMTP communication is protected using TLS with certificate validation enabled.
 
+Endpoint 2: OTP Verification Processing
 
+The endpoint receives:
 
-### Endpoint 2: Verification Details
-
-```python
-@app.post("/v1/auth/otp/verify")
-async def check_global_otp(payload: VerifySchema):
-
-```
-
-* It receives:
-```json
 {
-  "email": "user@example.com",
-  "code": "482913"
+"email": "[user@example.com](mailto:user@example.com)",
+"code": "482913"
 }
 
-```
+The verification workflow performs the following checks:
 
+1. Verify that the account is not currently locked.
+2. Verify that an active OTP exists.
+3. Verify that the OTP has not expired.
+4. Hash the submitted OTP using SHA-256.
+5. Compare the generated hash with the stored hash.
 
-* Then it checks whether that email has a pending OTP:
-```python
-if target_destination not in otp_store:
+Successful Verification
 
-```
+If the hashes match:
 
+• Authentication succeeds.
+• The OTP record is immediately deleted.
+• The OTP becomes unusable for future requests.
 
-* *Note:* If no OTP exists, it returns an error.
+Failed Verification
 
+If the hashes do not match:
 
-* If an OTP exists, it compares:
-```python
-if otp_store[target_destination] == user_token:
+• The verification attempt counter is incremented.
+• The user receives an authentication failure response.
 
-```
+Account Lockout Protection
 
+The system tracks failed verification attempts.
 
-* If the code matches, it deletes the OTP:
-```python
-del otp_store[target_destination]
+Maximum Failed Attempts:
 
-```
+5
 
+If the limit is exceeded:
 
-* *Note:* That makes the OTP one-time use.
+• The OTP is invalidated.
+• A temporary lockout is applied.
+• Additional verification attempts are blocked until the lockout expires.
 
+Current Lockout Duration:
 
+5 minutes
 
-### Security Features in OTP Backend
+Security Features
 
-* Generates random 6-digit OTP
-* OTP is linked to a specific email
-* OTP is deleted after successful verification
-* Email format is validated
-* SMTP uses TLS
+• Cryptographically secure OTP generation
+• SHA-256 OTP hashing
+• TLS-secured email transport
+• Email format validation
+• OTP expiration (5 minutes)
+• One-time-use OTPs
+• Verification attempt tracking
+• Temporary account lockouts
+• Email-based rate limiting
+• OTP resend cooldown controls
 
-### Security Weaknesses
+Current Security Limitations
 
-* OTP does not expire
-* No wrong-attempt limit
-* No resend limit
-* Uses random instead of secrets
-* Gmail app password is hardcoded
-* OTP is visible in email subject
-* CORS allows all origins
-* OTP is stored only in memory
+• Authentication state is stored in memory only
+• Server restarts invalidate all active OTPs
+• No distributed storage for horizontal scaling
+• No IP-based rate limiting
+• No Web Application Firewall (WAF)
+• No session binding mechanism
+• No background email queue
+• No delivery tracking or observability
+• Gmail SMTP remains the email transport provider
+• CORS configuration is overly permissive for production environments
+• OTP values are currently logged during generation and should be removed before production deployment
+
+Current Security Assessment
+
+Overall Security Score: 8.0/10
+
+The system provides strong protection against common OTP attacks through secure token generation, cryptographic hashing, expiration controls, lockout mechanisms, and rate limiting. Remaining improvements are primarily focused on scalability, operational resilience, abuse prevention, and enterprise-grade infrastructure.
+in memory
 * Server restart deletes all OTP
