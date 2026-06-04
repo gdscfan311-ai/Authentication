@@ -179,229 +179,203 @@ user_email = decoded_payload["sub"]
 
 
 
+# 2.  OTP Authentication Service
 
+## Overview
 
+This service provides email-based One-Time Password (OTP) authentication using FastAPI and Gmail SMTP. It generates a secure 6-digit OTP, delivers it to the user's email address, and verifies the submitted code before granting access.
 
+---
 
-2. OTP-Based Backend
+## Authentication Flow
 
-Core Technology
+```text
+User Email
+    │
+    ▼
+Request OTP
+    │
+    ▼
+Generate Secure OTP
+    │
+    ▼
+Hash OTP (SHA-256)
+    │
+    ▼
+Store Hash + Expiry + Attempt Counter
+    │
+    ▼
+Send OTP via Email
+    │
+    ▼
+User Submits OTP
+    │
+    ▼
+Hash Submitted OTP
+    │
+    ▼
+Compare Hashes
+    │
+    ▼
+Success / Failure
+```
 
-This backend uses a secure 6-digit email OTP authentication system built with FastAPI.
+---
 
-Main Purpose
+## Features
 
-User enters email → backend generates secure OTP → OTP is hashed and stored → OTP is sent by email → user enters OTP → backend verifies the submitted code against the stored hash.
+### Secure OTP Generation
 
-App Initialization & CORS Configuration
+* Cryptographically secure 6-digit OTP generation using Python's `secrets` module.
+* OTP range: `100000 - 999999`.
 
-The application is initialized using FastAPI.
+### OTP Hashing
 
-Cross-Origin Resource Sharing (CORS) is enabled to allow frontend applications to communicate with the authentication API.
+* OTPs are hashed using SHA-256 before storage.
+* Plaintext OTPs are never stored after generation.
+* Verification is performed by hashing the submitted OTP and comparing it against the stored hash.
 
-Current Configuration
+### OTP Expiration
 
-allow_origins=["*"]
+* OTP validity period: **5 minutes**
+* Expired OTPs are automatically rejected.
 
-Note:
+### Verification Protection
 
-This configuration is acceptable for development and testing environments but should be restricted to trusted frontend domains in production deployments.
+* Maximum verification attempts: **5**
+* OTP is invalidated after exceeding the attempt limit.
+* Temporary lockout applied after repeated failures.
 
-Configuration Values
+### Request Rate Limiting
 
-The application loads the following configuration values:
+* Maximum OTP requests per email: **3 per hour**
+* Resend cooldown: **30 seconds**
 
-• SENDER_GMAIL
-• GMAIL_APP_PASSWORD
+### Email Validation
 
-These credentials are used to authenticate with Gmail SMTP for transactional email delivery.
+* Email addresses are validated using Pydantic's `EmailStr`.
 
-Data Storage
+### One-Time Use
 
-The backend currently stores authentication state in memory using Python dictionaries:
+* OTPs are immediately deleted after successful verification.
 
-• otp_store
-• otp_send_history
-• otp_verify_lockouts
+### Secure Email Transport
 
-OTP records contain:
+* Gmail SMTP with TLS encryption.
+* Certificate validation enabled using Python SSL context.
 
-• Hashed OTP value
-• Expiration timestamp
-• Verification attempt counter
+---
 
-Example:
+## API Endpoints
 
+### Request OTP
+
+`POST /v1/auth/otp/request`
+
+Request:
+
+```json
 {
-"[user@example.com](mailto:user@example.com)": {
-"code_hash": "...",
-"expires_at": 1234567890,
-"attempts": 0
+  "email": "user@example.com"
 }
-}
+```
 
-Note:
+Response:
 
-The plaintext OTP is never stored after generation. Only its cryptographic hash is retained.
-
-Request and Verification Schemas
-
-OTP Request Schema
-
-class RequestSchema(BaseModel):
-email: EmailStr
-
-Purpose:
-
-Used when requesting a new OTP.
-
-OTP Verification Schema
-
-class VerifySchema(BaseModel):
-email: EmailStr
-code: str
-
-Purpose:
-
-Used when verifying a submitted OTP.
-
-Main Endpoints
-
-POST /v1/auth/otp/request
-
-POST /v1/auth/otp/verify
-
-Endpoint 1: OTP Request Processing
-
-The endpoint receives a valid email address.
-
-The submitted email is normalized to lowercase to ensure consistency.
-
-Before generating an OTP, the system performs several security checks:
-
-• Verification lockout status
-• OTP resend cooldown period
-• Email-based rate limiting
-
-Current Controls
-
-• Maximum 3 OTP requests per hour per email address
-• 30-second cooldown between OTP requests
-• Temporary lockout enforcement
-
-OTP Generation
-
-The system generates a cryptographically secure 6-digit OTP using a secure random source.
-
-Examples:
-
-193847
-650291
-904422
-
-OTP Protection
-
-Immediately after generation, the OTP is hashed using SHA-256.
-
-Only the hash is stored in memory.
-
-The plaintext OTP is sent to the user via email and is not retained for verification purposes.
-
-OTP Expiration
-
-Each OTP is assigned a five-minute validity period.
-
-Expired OTPs are automatically rejected during verification.
-
-Email Delivery
-
-The OTP is inserted into the HTML email body and delivered through Gmail SMTP.
-
-Transport Security
-
-SMTP communication is protected using TLS with certificate validation enabled.
-
-Endpoint 2: OTP Verification Processing
-
-The endpoint receives:
-
+```json
 {
-"email": "[user@example.com](mailto:user@example.com)",
-"code": "482913"
+  "status": "success"
 }
+```
 
-The verification workflow performs the following checks:
+---
 
-1. Verify that the account is not currently locked.
-2. Verify that an active OTP exists.
-3. Verify that the OTP has not expired.
-4. Hash the submitted OTP using SHA-256.
-5. Compare the generated hash with the stored hash.
+### Verify OTP
 
-Successful Verification
+`POST /v1/auth/otp/verify`
 
-If the hashes match:
+Request:
 
-• Authentication succeeds.
-• The OTP record is immediately deleted.
-• The OTP becomes unusable for future requests.
+```json
+{
+  "email": "user@example.com",
+  "code": "123456"
+}
+```
 
-Failed Verification
+Response:
 
-If the hashes do not match:
+```json
+{
+  "status": "success"
+}
+```
 
-• The verification attempt counter is incremented.
-• The user receives an authentication failure response.
+---
 
-Account Lockout Protection
+## Current Security Controls
 
-The system tracks failed verification attempts.
+| Control               | Status |
+| --------------------- | ------ |
+| Secure OTP Generation | ✅      |
+| OTP Hashing           | ✅      |
+| OTP Expiration        | ✅      |
+| Attempt Limiting      | ✅      |
+| Temporary Lockouts    | ✅      |
+| Email Validation      | ✅      |
+| SMTP TLS Encryption   | ✅      |
+| Rate Limiting         | ✅      |
+| Resend Cooldown       | ✅      |
+| One-Time Use OTP      | ✅      |
 
-Maximum Failed Attempts:
+---
 
-5
+## Current Limitations
 
-If the limit is exceeded:
+The current implementation is designed for small-scale deployments and proof-of-concept environments.
 
-• The OTP is invalidated.
-• A temporary lockout is applied.
-• Additional verification attempts are blocked until the lockout expires.
+Known limitations:
 
-Current Lockout Duration:
+* Authentication state is stored in memory.
+* Active OTPs are lost if the server restarts.
+* No Redis-backed distributed storage.
+* No IP-based rate limiting.
+* No Web Application Firewall (WAF).
+* No session binding mechanism.
+* No asynchronous email queue.
+* No email delivery tracking.
+* Gmail SMTP is used as the mail provider.
+* CORS is currently configured with `allow_origins=["*"]`.
 
-5 minutes
+---
 
-Security Features
+## Future Enhancements
 
-• Cryptographically secure OTP generation
-• SHA-256 OTP hashing
-• TLS-secured email transport
-• Email format validation
-• OTP expiration (5 minutes)
-• One-time-use OTPs
-• Verification attempt tracking
-• Temporary account lockouts
-• Email-based rate limiting
-• OTP resend cooldown controls
+### Infrastructure
 
-Current Security Limitations
+* Redis-based OTP storage
+* Redis-backed rate limiting
+* Distributed lockout management
 
-• Authentication state is stored in memory only
-• Server restarts invalidate all active OTPs
-• No distributed storage for horizontal scaling
-• No IP-based rate limiting
-• No Web Application Firewall (WAF)
-• No session binding mechanism
-• No background email queue
-• No delivery tracking or observability
-• Gmail SMTP remains the email transport provider
-• CORS configuration is overly permissive for production environments
-• OTP values are currently logged during generation and should be removed before production deployment
+### Security
 
-Current Security Assessment
+* IP-based rate limiting
+* Cloudflare/AWS WAF integration
+* Session binding using UUIDs
+* Exponential lockout policies
 
-Overall Security Score: 8.0/10
+### Email Delivery
 
-The system provides strong protection against common OTP attacks through secure token generation, cryptographic hashing, expiration controls, lockout mechanisms, and rate limiting. Remaining improvements are primarily focused on scalability, operational resilience, abuse prevention, and enterprise-grade infrastructure.
-in memory
-* Server restart deletes all OTP
+* Migration to Amazon SES, SendGrid, or Postmark
+* SPF, DKIM, and DMARC configuration
+* Delivery status tracking via webhooks
+
+### Scalability
+
+* Background email processing
+* Worker queue integration
+* Horizontal scaling support
+
+
+
+
